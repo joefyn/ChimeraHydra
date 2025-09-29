@@ -1,0 +1,26 @@
+name: chimera-gate
+on:
+  pull_request:
+    branches: [ main ]
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Find latest gate.decision.json
+        id: find
+        run: |
+          set -euo pipefail
+          file="$(ls -1d artifacts/*/gate.decision.json 2>/dev/null | sort | tail -n 1 || true)"
+          if [ -z "${file}" ]; then
+            echo "No gate.decision.json found." >&2
+            exit 1
+          fi
+          echo "file=${file}" >> "$GITHUB_OUTPUT"
+      - name: Verify decision == approve
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq
+          decision=$(jq -r '.decision' "${{ steps.find.outputs.file }}")
+          echo "Gate decision: ${decision}"
+          test "${decision}" = "approve"

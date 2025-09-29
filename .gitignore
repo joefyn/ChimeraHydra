@@ -26,6 +26,10 @@ Thumbs.db
 # .vscode is tracked on purpose
 
 # Project
-artifacts/
+# Ignore all artifacts by default…
+artifacts/**
+
+# …but allow the gate decision JSON that CI reads
+!artifacts/**/gate.decision.json
 *.patch
 *.log

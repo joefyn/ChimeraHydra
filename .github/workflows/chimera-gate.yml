@@ -1,4 +1,5 @@
 name: chimera-gate
+
 on:
   pull_request:
     branches: [ main ]
@@ -9,16 +10,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Optional debug so you can see what the runner sees
+      - name: Debug artifacts tree
+        run: |
+          echo "::group::Artifacts tree"
+          (find artifacts -maxdepth 3 -type f -print || true)
+          echo "::endgroup::"
+
       - name: Find latest gate.decision.json
         id: find
         run: |
           set -euo pipefail
-          file="$(ls -1d artifacts/*/gate.decision.json 2>/dev/null | sort | tail -n 1 || true)"
+          file="$(find artifacts -type f -name gate.decision.json 2>/dev/null | sort | tail -n 1 || true)"
           if [ -z "${file}" ]; then
             echo "No gate.decision.json found." >&2
             exit 1
           fi
-          echo "file=${file}" >> $GITHUB_OUTPUT
+          echo "file=${file}" >> "$GITHUB_OUTPUT"
 
       - name: Verify decision == approve
         run: |

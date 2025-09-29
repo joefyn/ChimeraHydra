@@ -1,0 +1,12 @@
+{
+  "model": "gpt-5-codex",
+  "mode": "pr-only",
+  "defaultBranchPolicy": "auto-detect",
+  "branchNaming": ["feat/<slug>", "fix/<slug>", "chore/<slug>", "spike/<slug>"],
+  "pr": {
+    "base": "main",
+    "conventionalCommits": true,
+    "squash": true
+  },
+  "languages": ["python", "javascript", "typescript"]
+}

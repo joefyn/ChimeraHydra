@@ -1,21 +1,17 @@
 ﻿name: chimera-gate
-
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
-
 permissions:
   contents: read
   issues: read
   statuses: write
-
 jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: gate â†’ pending
+      - name: gate → pending
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -29,7 +25,6 @@ jobs:
               context: 'gate',
               description: 'gate running'
             });
-
       - name: require label ok-to-merge
         uses: actions/github-script@v7
         with:
@@ -45,8 +40,7 @@ jobs:
             const hasOk = labels.some(l => (l.name || "").toLowerCase() === "ok-to-merge");
             core.info(`ok-to-merge label: ${hasOk}`);
             if (!hasOk) core.setFailed("Gate FAIL: add label 'ok-to-merge' to pass.");
-
-      - name: gate â†’ conclude
+      - name: gate → conclude
         if: ${{ always() }}
         uses: actions/github-script@v7
         with:

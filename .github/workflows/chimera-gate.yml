@@ -1,110 +1,61 @@
 name: chimera-gate
 
 on:
-  # Normal enforcement path
   pull_request:
-    branches: [ main ]
-
-  # Let us run it once from main to "seed" the required-checks dropdown
-  workflow_dispatch:
-
-  # Only re-run from main when the workflow itself (or artifacts) change
-  push:
-    branches: [ main ]
-    paths:
-      - '.github/workflows/chimera-gate.yml'
-      - 'artifacts/**'
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
 permissions:
   contents: read
-  pull-requests: read
+  issues: read
+  statuses: write
 
 jobs:
   gate:
     runs-on: ubuntu-latest
-
     steps:
-      # Use PR HEAD on PRs (avoids default-branch ref issues)
-      - name: Checkout (PR)
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: gate → pending
+        uses: actions/github-script@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
+          script: |
+            const sha = context.payload.pull_request?.head.sha ?? context.sha;
+            await github.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              sha,
+              state: 'pending',
+              context: 'gate',
+              description: 'gate running'
+            });
 
-      # On manual/push runs, just check out main
-      - name: Checkout (main/manual)
-        if: github.event_name != 'pull_request'
-        uses: actions/checkout@v4
+      - name: require label ok-to-merge
+        uses: actions/github-script@v7
         with:
-          fetch-depth: 0
+          script: |
+            const pr = context.payload.pull_request?.number;
+            if (!pr) core.setFailed("No PR number in context.");
+            const { data: labels } = await github.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: pr
+            });
+            const hasOk = labels.some(l => (l.name || "").toLowerCase() === "ok-to-merge");
+            core.info(`ok-to-merge label: ${hasOk}`);
+            if (!hasOk) core.setFailed("Gate FAIL: add label 'ok-to-merge' to pass.");
 
-      # Optional: see what the runner actually has
-      - name: Debug artifacts tree
-        run: |
-          echo "::group::Artifacts tree"
-          (find artifacts -maxdepth 3 -type f -print || true)
-          echo "::endgroup::"
-
-      # Locate the latest gate.decision.json if present
-      - name: Find latest gate.decision.json
-        id: find
-        run: |
-          set -euo pipefail
-          file="$(find artifacts -type f -name gate.decision.json 2>/dev/null | sort | tail -n 1 || true)"
-          echo "file=${file}" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if [ -z "${file}" ]; then
-              echo "No gate.decision.json found in PR changes." >&2
-              exit 1
-            fi
-          else
-            # For workflow_dispatch / push on main, it's OK if missing (seeding run)
-            if [ -z "${file}" ]; then
-              echo "No gate.decision.json found (non-PR run); continuing to seed required-checks."
-            fi
-          fi
-
-      # Validate decision and (on PRs) bind to the PR HEAD SHA
-      - name: Validate decision (+ commit binding on PRs)
-        run: |
-          set -euo pipefail
-          if [ -z "${{ steps.find.outputs.file }}" ]; then
-            # Non-PR seed run without artifact: treat as pass
-            echo "No gate file; seeding run passes."
-            exit 0
-          fi
-
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jq
-
-          file="${{ steps.find.outputs.file }}"
-          decision="$(jq -r '.decision // empty' "$file")"
-          commit_field="$(jq -r '.commit // .sha // empty' "$file")"
-
-          echo "Gate decision: ${decision}"
-          echo "Gate commit  : ${commit_field}"
-
-          # Decision must be "approve"
-          if [ "${decision}" != "approve" ]; then
-            echo "gate.decision.json: decision must be \"approve\"." >&2
-            exit 1
-          fi
-
-          # On PRs, enforce commit binding to PR HEAD
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            head_sha="${{ github.event.pull_request.head.sha }}"
-            if [ -z "${commit_field}" ]; then
-              echo "gate.decision.json: missing commit/sha field." >&2
-              exit 1
-            fi
-            if [ "${commit_field}" != "${head_sha}" ]; then
-              echo "Expected commit: ${head_sha}"
-              echo "Found commit   : ${commit_field}"
-              echo "gate.decision.json: commit must match PR head SHA." >&2
-              exit 1
-            fi
-            echo "Gate OK: approve @ ${head_sha}"
-          else
-            echo "Non-PR run: commit binding not required."
-          fi
+      - name: gate → conclude
+        if: ${{ always() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.payload.pull_request?.head.sha ?? context.sha;
+            const ok  = "${{ job.status }}" === "success";
+            await github.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              sha,
+              state: ok ? 'success' : 'failure',
+              context: 'gate',
+              description: ok ? 'gate passed' : 'gate failed'
+            });

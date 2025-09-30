@@ -1,4 +1,4 @@
-name: chimera-gate
+﻿name: chimera-gate
 
 on:
   pull_request:
@@ -15,13 +15,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: gate → pending
+      - name: gate â†’ pending
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const sha = context.payload.pull_request?.head.sha ?? context.sha;
-            await github.repos.createCommitStatus({
+            await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo:  context.repo.repo,
               sha,
@@ -37,7 +37,7 @@ jobs:
           script: |
             const pr = context.payload.pull_request?.number;
             if (!pr) core.setFailed("No PR number in context.");
-            const { data: labels } = await github.issues.listLabelsOnIssue({
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
               owner: context.repo.owner,
               repo:  context.repo.repo,
               issue_number: pr
@@ -46,7 +46,7 @@ jobs:
             core.info(`ok-to-merge label: ${hasOk}`);
             if (!hasOk) core.setFailed("Gate FAIL: add label 'ok-to-merge' to pass.");
 
-      - name: gate → conclude
+      - name: gate â†’ conclude
         if: ${{ always() }}
         uses: actions/github-script@v7
         with:
@@ -54,7 +54,7 @@ jobs:
           script: |
             const sha = context.payload.pull_request?.head.sha ?? context.sha;
             const ok  = "${{ job.status }}" === "success";
-            await github.repos.createCommitStatus({
+            await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo:  context.repo.repo,
               sha,

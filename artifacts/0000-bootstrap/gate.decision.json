@@ -1,5 +1,4 @@
 {
   "decision": "approve",
-  "source": "bootstrap",
-  "notes": "Seed only. Replace with real pipeline output later."
+  "commit": "1819a1cf2d2d9a0962f5d6d43bd662952586825c"
 }

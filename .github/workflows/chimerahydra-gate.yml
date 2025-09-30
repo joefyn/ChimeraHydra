@@ -41,20 +41,27 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${HEAD_SHA}" \
             -d '{"state":"pending","context":"gate","description":"gate running"}'
 
-      - name: Evaluate approvals (pass iff ≥1 active approval)
+           - name: Evaluate approvals OR label
         id: eval
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Fetch all reviews; keep only each user's latest review state; count APPROVED
-          data="$(curl -sS -H "Authorization: Bearer ${{ github.token }}" \
-                        -H "Accept: application/vnd.github+json" \
-                        -H "X-GitHub-Api-Version: 2022-11-28" \
-                        "https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews")"
-          approvals=$(echo "$data" | jq '[ group_by(.user.login) | .[] | last | select(.state=="APPROVED") ] | length')
-          echo "approvals=$approvals"
-          if [ "${approvals:-0}" -ge 1 ]; then
-            echo "OK: ${approvals} approval(s)."
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          auth=(-H "Authorization: Bearer ${{ github.token }}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+
+          reviews_json="$(curl -sS "${auth[@]}" "https://api.github.com/repos/$repo/pulls/${PR_NUMBER}/reviews")"
+          approvals=$(echo "$reviews_json" | jq '[ group_by(.user.login)[] | last | select(.state=="APPROVED") ] | length')
+
+          labels_json="$(curl -sS "${auth[@]}" "https://api.github.com/repos/$repo/issues/${PR_NUMBER}/labels")"
+          has_label=$(echo "$labels_json" | jq -r 'any(.[]?; (.name|ascii_downcase)=="ok-to-merge")')
+
+          echo "Approvals: $approvals  Label ok-to-merge: $has_label"
+
+          if [ "$approvals" -ge 1 ] || [ "$has_label" = "true" ]; then
+            echo "Gate PASS (approval or ok-to-merge label)."
           else
-            echo "Need at least one active approval." >&2
+            echo "Gate FAIL: need 1 approval or add label 'ok-to-merge'." >&2
             exit 1
           fi
 

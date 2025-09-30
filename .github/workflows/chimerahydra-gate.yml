@@ -3,13 +3,16 @@ name: chimera-gate
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
 
 concurrency:
-  group: chimera-gate-${{ github.ref }}
+  group: chimera-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+  pull-requests: read
   statuses: write
 
 defaults:
@@ -21,8 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # Use PR head when present; fall back to the current commit SHA otherwise
       HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
 
     steps:
       - name: Checkout
@@ -38,12 +41,22 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${HEAD_SHA}" \
             -d '{"state":"pending","context":"gate","description":"gate running"}'
 
-      # ── YOUR REAL VALIDATION GOES HERE ─────────────────────────────────────────
-      - name: Run gate validation
+      - name: Evaluate approvals (pass iff ≥1 active approval)
+        id: eval
         run: |
-          echo "TODO: implement your actual gate checks."
-          # exit 1  # uncomment to simulate a failing gate
-      # ───────────────────────────────────────────────────────────────────────────
+          # Fetch all reviews; keep only each user's latest review state; count APPROVED
+          data="$(curl -sS -H "Authorization: Bearer ${{ github.token }}" \
+                        -H "Accept: application/vnd.github+json" \
+                        -H "X-GitHub-Api-Version: 2022-11-28" \
+                        "https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews")"
+          approvals=$(echo "$data" | jq '[ group_by(.user.login) | .[] | last | select(.state=="APPROVED") ] | length')
+          echo "approvals=$approvals"
+          if [ "${approvals:-0}" -ge 1 ]; then
+            echo "OK: ${approvals} approval(s)."
+          else
+            echo "Need at least one active approval." >&2
+            exit 1
+          fi
 
       - name: gate status → conclude
         if: ${{ always() }}

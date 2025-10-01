@@ -1,81 +1,61 @@
-# Doc #4 — Gate Logic v1 (Deterministic, permissive)
+name: chimera-gate
 
-Purpose: replace the “always-success” smoke step with a tiny real rule while preserving the exact legacy context `chimera-gate / gate`. This rule **fails** only when the PR title begins with `WIP` (case-insensitive). Everything else passes. This proves end-to-end decisions without blocking normal work.
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
+  workflow_dispatch:
 
----
+# Minimal, explicit permissions. Statuses are required for the legacy commit-status gate.
+permissions:
+  contents: read
+  statuses: write
 
-## Replacement step (drop-in)
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    # Job-level permissions (defensive duplication; safe if workflow-level also present)
+    permissions:
+      contents: read
+      statuses: write
 
-```yaml
-# ===== BEGIN [CHIMERA-GATE-V1] =====
-- name: Gate decision (WIP-title policy → success/failure)
-  uses: actions/github-script@v7
-  with:
-    github-token: ${{ secrets.GITHUB_TOKEN }}
-    script: |
-      // Preserve exact context string
-      const CONTEXT = "chimera-gate / gate";
+    steps:
+      - name: Gate decision (WIP-title policy → success/failure)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // ===== BEGIN [CHIMERA-GATE-V1] =====
+            // Preserve exact context string used by branch protection
+            const CONTEXT = "chimera-gate / gate";
 
-      // Resolve the correct SHA (PR head on pull_request, otherwise github.sha)
-      const sha = (context.payload.pull_request && context.payload.pull_request.head && context.payload.pull_request.head.sha) || context.sha;
+            // Resolve the correct SHA: PR head on pull_request, otherwise the workflow's commit
+            const sha = (context.payload.pull_request && context.payload.pull_request.head && context.payload.pull_request.head.sha) || context.sha;
 
-      // Pull request title (empty string if not a PR event)
-      const title = (context.payload.pull_request && context.payload.pull_request.title) || "";
+            // PR title if present (empty when not a PR-driven run)
+            const title = (context.payload.pull_request && context.payload.pull_request.title) || "";
 
-      // Policy: fail iff title starts with "WIP" (case-insensitive, optional punctuation/colon after)
-      const isWip = /^\s*WIP\b[:\-\s]?/i.test(title);
+            // Policy: fail iff title starts with "WIP" (case-insensitive, optional punctuation)
+            const isWip = /^\s*WIP\b[:\-\s]?/i.test(title);
 
-      const state = isWip ? "failure" : "success";
-      const description = isWip
-        ? `Gate failed: PR title begins with WIP → rename title to pass`
-        : `Gate passed: title policy satisfied`;
+            const state = isWip ? "failure" : "success";
+            const description = isWip
+              ? "Gate failed: PR title begins with WIP → rename title to pass"
+              : "Gate passed: title policy satisfied";
 
-      // Optional: link back to the run summary
-      const target_url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const target_url = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
 
-      // Write legacy commit status (branch protection key)
-      await github.rest.repos.createCommitStatus({
-        owner: context.repo.owner,
-        repo: context.repo.repo,
-        sha,
-        state,
-        context: CONTEXT,
-        description,
-        target_url,
-      });
+            // Write legacy commit status (this is what branch protection enforces)
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              state,
+              context: CONTEXT,
+              description,
+              target_url,
+            });
 
-      core.info(`Gate decision = ${state} on ${sha} (title=\"${title}\")`);
-# ===== END [CHIMERA-GATE-V1] =====
-```
-
----
-
-## Notes
-
-* **Permissions** required on the workflow:
-
-  ```yaml
-  permissions:
-    contents: read
-    statuses: write
-  ```
-* **Triggers** must include PR events to `main` and (optionally) `workflow_dispatch`. Your current file already does this per the handover.
-* **Context must be exact**: `chimera-gate / gate`. Do not change.
-
----
-
-## Rollback
-
-If anything misbehaves, simply revert this step (or change your PR title to remove a leading `WIP`).
-
----
-
-## Why this counts as “real logic”
-
-* It inspects **actual PR metadata** and can yield **failure** under a reproducible condition.
-* Zero external deps; runs with `actions/github-script` only.
-* Keeps the legacy status path that your Branch Protection enforces.
-
----
-
-**Why Doc #4 exists:** This canvas doc is the golden source for the authoritative drop-in workflow step. It avoids YAML errors in chat, ensures persistence across sessions, and provides a rollback anchor if later edits break the workflow.
+            core.info(`Gate decision = ${state} on ${sha} (title="${title}")`);
+            // ===== END [CHIMERA-GATE-V1] =====

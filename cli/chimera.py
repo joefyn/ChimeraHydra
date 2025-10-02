@@ -9,6 +9,13 @@ def run_intent(args):
     out_path=os.path.join(out_dir,'prompt.audit.json')
     with open(out_path,'w',encoding='utf-8') as f: json.dump(doc,f,indent=2,ensure_ascii=False)
     print(out_path); return 0
+def run_context(args):
+    ts=_ts(); run_id=args.run_id or ts
+    out_dir=os.path.join('artifacts', ts, run_id); _ensure_dir(out_dir)
+    bundle={'run_id':run_id,'excerpts':[],'notes':''}
+    out_path=os.path.join(out_dir,'context.bundle.json')
+    with open(out_path,'w',encoding='utf-8') as f: json.dump(bundle,f,indent=2,ensure_ascii=False)
+    print(out_path); return 0
 def main():
     parser=argparse.ArgumentParser(prog='chimera',description='Chimera CLI')
     sub=parser.add_subparsers(dest='cmd',required=True)
@@ -20,6 +27,9 @@ def main():
     p_intent.add_argument('--glossary',action='append')
     p_intent.add_argument('--run-id',dest='run_id')
     p_intent.set_defaults(func=run_intent)
+    p_ctx=sub.add_parser('context',help='Emit context.bundle.json scaffold')
+    p_ctx.add_argument('--run-id',dest='run_id')
+    p_ctx.set_defaults(func=run_context)
     args=parser.parse_args(); return args.func(args)
 if **name**=='**main**':
     raise SystemExit(main())

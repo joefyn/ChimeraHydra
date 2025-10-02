@@ -2,118 +2,89 @@ name: chimera-gate
 
 on:
   pull_request:
-    branches: [ main ]
-    types: [ opened, synchronize, reopened, ready_for_review ]
+    branches: [ "main" ]
+    types: [ opened, synchronize, reopened, ready_for_review, labeled, unlabeled ]
   workflow_dispatch:
 
-# Minimal, explicit permissions. Statuses are required for the legacy commit-status gate.
 permissions:
-contents: read
-statuses: write
+  contents: read
+  statuses: write
 
 jobs:
-gate:
-name: chimera-gate / gate
-runs-on: ubuntu-latest
-steps:
-- uses: actions/checkout@v4
+  gate:
+    name: chimera-gate / gate # Corrected name to match the required check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-```
-  # Run your real gate checks here (replace with actual lints/tests/audits)
-  - name: Run gate checks
-    run: |
-      echo "Run lints/tests/audits here"
-      # Example: pytest -q
-      # exit 1  # uncomment to simulate failure
+      # Run your real gate checks here (replace with actual lints/tests/audits)
+      - name: Run gate checks
+        run: |
+          echo "Run lints/tests/audits here"
+          # Example: pytest -q
+          # exit 1  # uncomment to simulate failure
 
-  # Python for artifact validation
+      # Python for artifact validation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-  - uses: actions/setup-python@v5
+      - name: Install jsonschema
+        run: pip install jsonschema
 
-    with:
+      # 4e - Schema validation (hard fail) - This is now a separate, valid step
+      - name: Validate Chimera artifacts against schemas (4e, hard)
+        run: |
+          python scripts/validate_artifacts.py \
+            --schemas-dir schemas \
+            --artifacts-dir artifacts \
+            --dialect 2020-12 \
+            --fail-on-invalid
 
-      python-version: '3.11'
+      # Step 6d — Check glossary drift (hard fail) - This is also a separate step
+      - name: Check glossary drift (6d, hard fail)
+        if: ${{ always() }}
+        run: |
+          set -e
+          python scripts/check-glossary.py > .glossary_out_path.txt
+          OUT_PATH=$(cat .glossary_out_path.txt)
+          echo "drift report: ${OUT_PATH}"
+          STATUS=$(jq -r '.status' "${OUT_PATH}" 2>/dev/null || echo pass)
+          if [ "${STATUS}" != "pass" ]; then
+            echo "glossary drift detected" >&2
+            exit 1
+          fi
 
+      # Success path -> write legacy commit status to PR HEAD
+      - name: Emit legacy commit status (success)
+        if: ${{ success() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isPR = context.eventName === 'pull_request';
+            const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
+            const { owner, repo } = context.repo;
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha,
+              state: 'success',
+              context: 'chimera-gate / gate',
+              description: 'Gate passed',
+              target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+            });
 
-
-  - name: Install jsonschema
-
-    run: pip install jsonschema
-
-
-
-  # 4e - Schema validation (hard fail)
-
-  - name: Validate Chimera artifacts against schemas (4e, hard)
-
-  # Step 6d — Check glossary drift (hard fail)
-
-  - name: Check glossary drift (6d, hard fail)
-
-    if: ${{ always() }}
-
-    run: |
-
-      set -e
-
-      python scripts/check-glossary.py > .glossary_out_path.txt
-
-      OUT_PATH=$(cat .glossary_out_path.txt)
-
-      echo "drift report: ${OUT_PATH}"
-
-      STATUS=$(jq -r '.status' "${OUT_PATH}" 2>/dev/null || echo pass)
-
-      if [ "${STATUS}" != "pass" ]; then
-
-        echo "glossary drift detected" >&2
-
-        exit 1
-
-      fi
-
-    run: |
-
-      python scripts/validate_artifacts.py \
-
-        --schemas-dir schemas \
-
-        --artifacts-dir artifacts \
-
-        --dialect 2020-12 \
-
-        --fail-on-invalid
-  # Success path -> write legacy commit status to PR HEAD
-  - name: Emit legacy commit status (success)
-    if: ${{ success() }}
-    uses: actions/github-script@v7
-    with:
-      script: |
-        const isPR = context.eventName === 'pull_request';
-        const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
-        const { owner, repo } = context.repo;
-        await github.rest.repos.createCommitStatus({
-          owner, repo, sha,
-          state: 'success',
-          context: 'chimera-gate / gate',
-          description: 'Gate passed',
-          target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
-        });
-
-  # Failure/cancel path -> write failure
-  - name: Emit legacy commit status (failure)
-    if: ${{ failure() || cancelled() }}
-    uses: actions/github-script@v7
-    with:
-      script: |
-        const isPR = context.eventName === 'pull_request';
-        const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
-        const { owner, repo } = context.repo;
-        await github.rest.repos.createCommitStatus({
-          owner, repo, sha,
-          state: 'failure',
-          context: 'chimera-gate / gate',
-          description: 'Gate failed',
-          target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
-        });
-```
+      # Failure/cancel path -> write failure
+      - name: Emit legacy commit status (failure)
+        if: ${{ failure() || cancelled() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isPR = context.eventName === 'pull_request';
+            const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
+            const { owner, repo } = context.repo;
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha,
+              state: 'failure',
+              context: 'chimera-gate / gate',
+              description: 'Gate failed',
+              target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+            });

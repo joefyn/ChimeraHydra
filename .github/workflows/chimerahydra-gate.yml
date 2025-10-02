@@ -1,33 +1,61 @@
 name: chimera-gate
 
 on:
-  pull_request:
-    branches: [ main ]
-    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
-  workflow_dispatch:
+pull_request:
+branches: [ main ]
+types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+workflow_dispatch:
 
 permissions:
-  contents: read
-  statuses: write
+contents: read
+statuses: write
 
 jobs:
-  gate:
-    name: chimera-gate / gate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+gate:
+name: chimera-gate / gate
+runs-on: ubuntu-latest
+steps:
+- uses: actions/checkout@v4
 
-      - name: Emit legacy commit status (success)
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const isPR = context.eventName === 'pull_request';
-            const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
-            const { owner, repo } = context.repo;
-            await github.rest.repos.createCommitStatus({
-              owner, repo, sha,
-              state: 'success',
-              context: 'chimera-gate / gate',
-              description: 'Gate: smoke OK',
-              target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
-            });
+```
+  # Run your real gate checks here (replace with actual lints/tests/audits)
+  - name: Run gate checks
+    run: |
+      echo "Run lints/tests/audits here"
+      # Example: pytest -q
+      # exit 1  # uncomment to simulate failure
+
+  # Success path → write legacy commit status to PR HEAD
+  - name: Emit legacy commit status (success)
+    if: ${{ success() }}
+    uses: actions/github-script@v7
+    with:
+      script: |
+        const isPR = context.eventName === 'pull_request';
+        const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
+        const { owner, repo } = context.repo;
+        await github.rest.repos.createCommitStatus({
+          owner, repo, sha,
+          state: 'success',
+          context: 'chimera-gate / gate',
+          description: 'Gate passed',
+          target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+        });
+
+  # Failure/cancel path → write failure
+  - name: Emit legacy commit status (failure)
+    if: ${{ failure() || cancelled() }}
+    uses: actions/github-script@v7
+    with:
+      script: |
+        const isPR = context.eventName === 'pull_request';
+        const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
+        const { owner, repo } = context.repo;
+        await github.rest.repos.createCommitStatus({
+          owner, repo, sha,
+          state: 'failure',
+          context: 'chimera-gate / gate',
+          description: 'Gate failed',
+          target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+        });
+```

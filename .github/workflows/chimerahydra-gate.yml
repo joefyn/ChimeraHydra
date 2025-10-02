@@ -2,8 +2,8 @@ name: chimera-gate
 
 on:
 pull_request:
-branches: [ main ]
-types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+branches: [ "main" ]
+types: [ opened, synchronize, reopened, ready_for_review, labeled, unlabeled ]
 workflow_dispatch:
 
 permissions:
@@ -25,7 +25,37 @@ steps:
       # Example: pytest -q
       # exit 1  # uncomment to simulate failure
 
-  # Success path → write legacy commit status to PR HEAD
+  # Python for artifact validation
+  - uses: actions/setup-python@v5
+    with:
+      python-version: '3.11'
+
+  - name: Install jsonschema
+    run: pip install jsonschema
+
+  # 4e - Schema validation (hard fail)
+  - name: Validate Chimera artifacts against schemas (4e, hard)
+  # Step 6d — Check glossary drift (hard fail)
+  - name: Check glossary drift (6d, hard fail)
+    if: ${{ always() }}
+    run: |
+      set -e
+      python scripts/check-glossary.py > .glossary_out_path.txt
+      OUT_PATH=$(cat .glossary_out_path.txt)
+      echo "drift report: ${OUT_PATH}"
+      STATUS=$(jq -r '.status' "${OUT_PATH}" 2>/dev/null || echo pass)
+      if [ "${STATUS}" != "pass" ]; then
+        echo "glossary drift detected" >&2
+        exit 1
+      fi
+    run: |
+      python scripts/validate_artifacts.py \
+        --schemas-dir schemas \
+        --artifacts-dir artifacts \
+        --dialect 2020-12 \
+        --fail-on-invalid
+
+  # Success path -> write legacy commit status to PR HEAD
   - name: Emit legacy commit status (success)
     if: ${{ success() }}
     uses: actions/github-script@v7
@@ -42,7 +72,7 @@ steps:
           target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
         });
 
-  # Failure/cancel path → write failure
+  # Failure/cancel path -> write failure
   - name: Emit legacy commit status (failure)
     if: ${{ failure() || cancelled() }}
     uses: actions/github-script@v7

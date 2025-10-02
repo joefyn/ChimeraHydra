@@ -1,0 +1,58 @@
+﻿{
+    "title":  "prompt.audit.json schema",
+    "type":  "object",
+    "additionalProperties":  false,
+    "required":  [
+                     "run_id",
+                     "goal"
+                 ],
+    "properties":  {
+                       "run_id":  {
+                                      "minLength":  6,
+                                      "type":  "string"
+                                  },
+                       "goal":  {
+                                    "type":  "string"
+                                },
+                       "DoD":  {
+                                   "oneOf":  [
+                                                 {
+                                                     "type":  "string"
+                                                 },
+                                                 {
+                                                     "items":  {
+                                                                   "type":  "string"
+                                                               },
+                                                     "type":  "array"
+                                                 }
+                                             ]
+                               },
+                       "constraints":  {
+                                           "items":  {
+                                                         "type":  "string"
+                                                     },
+                                           "type":  "array"
+                                       },
+                       "risks":  {
+                                     "items":  {
+                                                   "type":  "string"
+                                               },
+                                     "type":  "array"
+                                 },
+                       "glossary_keys":  {
+                                             "items":  {
+                                                           "type":  "string"
+                                                       },
+                                             "type":  "array"
+                                         },
+                       "context":  {
+                                       "type":  "object"
+                                   },
+                       "ts":  {
+                                  "type":  "string",
+                                  "format":  "date-time"
+                              }
+                   },
+    "$schema":  "https://json-schema.org/draft/2020-12/schema",
+    "$id":  "https://joefyn.github.io/ChimeraHydra/schemas/prompt.audit.schema.json"
+}

@@ -1,61 +1,127 @@
+﻿Save as **`.github/workflows/chimerahydra-gate.yml`** (replace file contents).
+
 name: chimera-gate
 
 on:
-pull_request:
-branches: [ main ]
-types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
-workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
+    types: [ opened, synchronize, reopened, ready_for_review, labeled, unlabeled ]
+  workflow_dispatch:
 
 permissions:
-contents: read
-statuses: write
+  contents: read
+  statuses: write
 
 jobs:
-gate:
-name: gate
-runs-on: ubuntu-latest
-steps:
-- uses: actions/checkout@v4
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-```
-  # Run your real gate checks here (replace with actual lints/tests/audits)
-  - name: Run gate checks
-    run: |
-      echo "Run lints/tests/audits here"
-      # Example: pytest -q
-      # exit 1  # uncomment to simulate failure
+      # Run your real gate checks here (replace with actual lints/tests/audits)
+      - name: Run gate checks
+        run: |
+          echo "Run lints/tests/audits here"
+          # Example: pytest -q
+          # exit 1  # uncomment to simulate failure
 
-  # Success path → write legacy commit status to PR HEAD
-  - name: Emit legacy commit status (success)
-    if: ${{ success() }}
-    uses: actions/github-script@v7
-    with:
-      script: |
-        const isPR = context.eventName === 'pull_request';
-        const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
-        const { owner, repo } = context.repo;
-        await github.rest.repos.createCommitStatus({
-          owner, repo, sha,
-          state: 'success',
-          context: 'chimera-gate / gate',
-          description: 'Gate passed',
-          target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
-        });
 
-  # Failure/cancel path → write failure
-  - name: Emit legacy commit status (failure)
-    if: ${{ failure() || cancelled() }}
-    uses: actions/github-script@v7
-    with:
-      script: |
-        const isPR = context.eventName === 'pull_request';
-        const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
-        const { owner, repo } = context.repo;
-        await github.rest.repos.createCommitStatus({
-          owner, repo, sha,
-          state: 'failure',
-          context: 'chimera-gate / gate',
-          description: 'Gate failed',
-          target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
-        });
-```
+      # 4d â€” Schema validation (soft; report-only)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install jsonschema
+        run: pip install jsonschema
+
+      - name: Validate Chimera artifacts against schemas (4d, soft)
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json, sys, glob, pathlib
+          from jsonschema import Draft202012Validator
+
+          pairs = [
+            ('artifacts/*/*/prompt.audit.json','schemas/prompt.audit.schema.json'),
+            ('artifacts/*/*/code.plan.json','schemas/code.plan.schema.json'),
+            ('artifacts/*/*/codex.instructions.json','schemas/codex.instructions.schema.json'),
+          ]
+
+          ok = skip = fail = 0
+          for inst_glob, schema_path in pairs:
+            sp = pathlib.Path(schema_path)
+            if not sp.exists():
+              print(f'SKIP schema missing: {schema_path}')
+              skip += 1
+              continue
+
+            schema = json.load(open(sp, 'r', encoding='utf-8'))
+            validator = Draft202012Validator(schema)
+
+            matched = False
+            for inst_path in glob.glob(inst_glob):
+              matched = True
+              try:
+                data = json.load(open(inst_path, 'r', encoding='utf-8'))
+                validator.validate(data)
+                print(f'OK {inst_path}')
+                ok += 1
+              except Exception as e:
+                print(f'FAIL {inst_path}: {e}')
+                fail += 1
+
+            if not matched:
+              print(f'SKIP no instances for {inst_glob}')
+              skip += 1
+
+          print(f'SUMMARY ok={ok} fail={fail} skip={skip}')
+          sys.exit(0)  # soft â€” never fail the job in 4d
+          PY
+
+**Notes**
+
+* Draft **2020â€‘12** validator is used via `jsonschema`.
+* Step is **soft** by design (4d): it reports findings but cannot fail the job. 4e will flip this to hard fail.
+* Safe to add above existing status writers; it does not alter success/failure semantics.
+* If no artifacts or schemas are present, the step prints SKIP lines and exits 0.
+
+      # Success path â†’ write legacy commit status to PR HEAD
+      - name: Emit legacy commit status (success)
+        if: ${{ success() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isPR = context.eventName === 'pull_request';
+            const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
+            const { owner, repo } = context.repo;
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha,
+              state: 'success',
+              context: 'chimera-gate / gate',
+              description: 'Gate passed',
+              target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+            });
+
+      # Failure/cancel path â†’ write failure
+      - name: Emit legacy commit status (failure)
+        if: ${{ failure() || cancelled() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isPR = context.eventName === 'pull_request';
+            const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
+            const { owner, repo } = context.repo;
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha,
+              state: 'failure',
+              context: 'chimera-gate / gate',
+              description: 'Gate failed',
+              target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+            });
+
+**Notes**
+
+* Safe to replace: preserves triggers, permissions, and both legacy status writes to the **PR head SHA**.
+* No other behaviour is removed **except** any custom steps you may have added earlier (e.g., validation). Weâ€™ll add the **4d** validation step just above the status writers next.

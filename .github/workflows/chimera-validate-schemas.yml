@@ -1,0 +1,83 @@
+Save this file as **`.github/workflows/chimera-validate-schemas.yml`**.
+
+```yaml
+name: Chimera — Validate Schemas
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - "schemas/**/*.json"
+      - ".github/workflows/chimera-validate-schemas.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install jsonschema
+        run: |
+          python -m pip install --upgrade pip
+          pip install jsonschema
+
+      - name: Validate schema files (Draft 2020-12)
+        run: |
+          python - << 'PY'
+          import json, sys, pathlib
+          from jsonschema.validators import Draft202012Validator
+
+          ROOT = pathlib.Path('.')
+          files = [
+              ROOT/'schemas/prompt.audit.schema.json',
+              ROOT/'schemas/code.plan.schema.json',
+              ROOT/'schemas/codex.instructions.schema.json',
+          ]
+
+          ok = []
+          bad = []
+
+          for p in files:
+              try:
+                  with open(p, 'r', encoding='utf-8') as f:
+                      schema = json.load(f)
+
+                  required_schema = "https://json-schema.org/draft/2020-12/schema"
+                  if schema.get("$schema") != required_schema:
+                      raise ValueError(f"$schema mismatch: {schema.get('$schema')}")
+
+                  if not isinstance(schema.get("$id"), str) or not schema["$id"]:
+                      raise ValueError("missing/empty $id")
+
+                  # Validate against the Draft 2020-12 metaschema
+                  Draft202012Validator.check_schema(schema)
+                  ok.append(str(p))
+              except Exception as e:
+                  bad.append(f"{p}: {e}")
+
+          if bad:
+              print("SCHEMA_VALIDATION=FAIL")
+              for line in bad:
+                  print(line)
+              sys.exit(1)
+          else:
+              print("SCHEMA_VALIDATION=OK")
+              for p in ok:
+                  print(p)
+          PY
+```
+
+**Notes**
+
+* Triggers on PRs to `main` and manual dispatch. Paths filter keeps it fast.
+* Uses `jsonschema` Draft 2020‑12 to meta‑validate each schema.
+* No change to branch protection (legacy required context remains the Gate).

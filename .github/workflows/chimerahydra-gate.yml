@@ -1,5 +1,3 @@
-﻿Save as **`.github/workflows/chimerahydra-gate.yml`** (replace file contents).
-
 name: chimera-gate
 
 on:
@@ -26,8 +24,7 @@ jobs:
           # Example: pytest -q
           # exit 1  # uncomment to simulate failure
 
-
-      # 4d â€” Schema validation (soft; report-only)
+      # 4d - Schema validation (soft; report-only)
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -57,14 +54,16 @@ jobs:
               skip += 1
               continue
 
-            schema = json.load(open(sp, 'r', encoding='utf-8'))
+            with open(sp, 'r', encoding='utf-8') as fh:
+              schema = json.load(fh)
             validator = Draft202012Validator(schema)
 
             matched = False
             for inst_path in glob.glob(inst_glob):
               matched = True
               try:
-                data = json.load(open(inst_path, 'r', encoding='utf-8'))
+                with open(inst_path, 'r', encoding='utf-8') as ih:
+                  data = json.load(ih)
                 validator.validate(data)
                 print(f'OK {inst_path}')
                 ok += 1
@@ -77,17 +76,10 @@ jobs:
               skip += 1
 
           print(f'SUMMARY ok={ok} fail={fail} skip={skip}')
-          sys.exit(0)  # soft â€” never fail the job in 4d
+          sys.exit(0)  # soft - never fail the job in 4d
           PY
 
-**Notes**
-
-* Draft **2020â€‘12** validator is used via `jsonschema`.
-* Step is **soft** by design (4d): it reports findings but cannot fail the job. 4e will flip this to hard fail.
-* Safe to add above existing status writers; it does not alter success/failure semantics.
-* If no artifacts or schemas are present, the step prints SKIP lines and exits 0.
-
-      # Success path â†’ write legacy commit status to PR HEAD
+      # Success path -> write legacy commit status to PR HEAD
       - name: Emit legacy commit status (success)
         if: ${{ success() }}
         uses: actions/github-script@v7
@@ -104,7 +96,7 @@ jobs:
               target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
             });
 
-      # Failure/cancel path â†’ write failure
+      # Failure/cancel path -> write failure
       - name: Emit legacy commit status (failure)
         if: ${{ failure() || cancelled() }}
         uses: actions/github-script@v7
@@ -120,8 +112,3 @@ jobs:
               description: 'Gate failed',
               target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
             });
-
-**Notes**
-
-* Safe to replace: preserves triggers, permissions, and both legacy status writes to the **PR head SHA**.
-* No other behaviour is removed **except** any custom steps you may have added earlier (e.g., validation). Weâ€™ll add the **4d** validation step just above the status writers next.

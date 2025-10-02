@@ -1,4 +1,4 @@
-name: chimera-gate
+﻿name: chimera-gate
 
 on:
   pull_request:
@@ -34,7 +34,6 @@ jobs:
 
       - name: Validate Chimera artifacts against schemas (4d, soft)
         if: ${{ always() }}
-        continue-on-error: true
         run: |
           python - <<'PY'
           import json, sys, glob, pathlib

@@ -35,6 +35,19 @@ steps:
 
   # 4e - Schema validation (hard fail)
   - name: Validate Chimera artifacts against schemas (4e, hard)
+  # Step 6d — Check glossary drift (hard fail)
+  - name: Check glossary drift (6d, hard fail)
+    if: ${{ always() }}
+    run: |
+      set -e
+      python scripts/check-glossary.py > .glossary_out_path.txt
+      OUT_PATH=$(cat .glossary_out_path.txt)
+      echo "drift report: ${OUT_PATH}"
+      STATUS=$(jq -r '.status' "${OUT_PATH}" 2>/dev/null || echo pass)
+      if [ "${STATUS}" != "pass" ]; then
+        echo "glossary drift detected" >&2
+        exit 1
+      fi
     run: |
       python scripts/validate_artifacts.py \
         --schemas-dir schemas \

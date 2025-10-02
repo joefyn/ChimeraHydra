@@ -8,54 +8,85 @@ on:
 
 # Minimal, explicit permissions. Statuses are required for the legacy commit-status gate.
 permissions:
-  contents: read
-  statuses: write
+contents: read
+statuses: write
 
 jobs:
-  gate:
-    name: gate
-    runs-on: ubuntu-latest
-    # Job-level permissions (defensive duplication; safe if workflow-level also present)
-    permissions:
-      contents: read
-      statuses: write
+gate:
+name: chimera-gate / gate
+runs-on: ubuntu-latest
+steps:
+- uses: actions/checkout@v4
 
-    steps:
-      - name: Gate decision (WIP-title policy → success/failure)
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            // ===== BEGIN [CHIMERA-GATE-V1] =====
-            // Preserve exact context string used by branch protection
-            const CONTEXT = "chimera-gate / gate";
+```
+  # Run your real gate checks here (replace with actual lints/tests/audits)
+  - name: Run gate checks
+    run: |
+      echo "Run lints/tests/audits here"
+      # Example: pytest -q
+      # exit 1  # uncomment to simulate failure
 
-            // Resolve the correct SHA: PR head on pull_request, otherwise the workflow's commit
-            const sha = (context.payload.pull_request && context.payload.pull_request.head && context.payload.pull_request.head.sha) || context.sha;
+  # Python for artifact validation
+  - uses: actions/setup-python@v5
+    with:
+      python-version: '3.11'
 
-            // PR title if present (empty when not a PR-driven run)
-            const title = (context.payload.pull_request && context.payload.pull_request.title) || "";
+  - name: Install jsonschema
+    run: pip install jsonschema
 
-            // Policy: fail iff title starts with "WIP" (case-insensitive, optional punctuation)
-            const isWip = /^\s*WIP\b[:\-\s]?/i.test(title);
+  # 4e - Schema validation (hard fail)
+  - name: Validate Chimera artifacts against schemas (4e, hard)
+  # Step 6d — Check glossary drift (hard fail)
+  - name: Check glossary drift (6d, hard fail)
+    if: ${{ always() }}
+    run: |
+      set -e
+      python scripts/check-glossary.py > .glossary_out_path.txt
+      OUT_PATH=$(cat .glossary_out_path.txt)
+      echo "drift report: ${OUT_PATH}"
+      STATUS=$(jq -r '.status' "${OUT_PATH}" 2>/dev/null || echo pass)
+      if [ "${STATUS}" != "pass" ]; then
+        echo "glossary drift detected" >&2
+        exit 1
+      fi
+    run: |
+      python scripts/validate_artifacts.py \
+        --schemas-dir schemas \
+        --artifacts-dir artifacts \
+        --dialect 2020-12 \
+        --fail-on-invalid
 
-            const state = isWip ? "failure" : "success";
-            const description = isWip
-              ? "Gate failed: PR title begins with WIP → rename title to pass"
-              : "Gate passed: title policy satisfied";
+  # Success path -> write legacy commit status to PR HEAD
+  - name: Emit legacy commit status (success)
+    if: ${{ success() }}
+    uses: actions/github-script@v7
+    with:
+      script: |
+        const isPR = context.eventName === 'pull_request';
+        const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
+        const { owner, repo } = context.repo;
+        await github.rest.repos.createCommitStatus({
+          owner, repo, sha,
+          state: 'success',
+          context: 'chimera-gate / gate',
+          description: 'Gate passed',
+          target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+        });
 
-            const target_url = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-
-            // Write legacy commit status (this is what branch protection enforces)
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha,
-              state,
-              context: CONTEXT,
-              description,
-              target_url,
-            });
-
-            core.info(`Gate decision = ${state} on ${sha} (title="${title}")`);
-            // ===== END [CHIMERA-GATE-V1] =====
+  # Failure/cancel path -> write failure
+  - name: Emit legacy commit status (failure)
+    if: ${{ failure() || cancelled() }}
+    uses: actions/github-script@v7
+    with:
+      script: |
+        const isPR = context.eventName === 'pull_request';
+        const sha = isPR ? context.payload.pull_request.head.sha : context.sha;
+        const { owner, repo } = context.repo;
+        await github.rest.repos.createCommitStatus({
+          owner, repo, sha,
+          state: 'failure',
+          context: 'chimera-gate / gate',
+          description: 'Gate failed',
+          target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
+        });
+```

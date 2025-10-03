@@ -1,124 +1,130 @@
-# 4e — Hard‑Fail Validation (Gate)
-
-**Goal:** Flip artifact validation from soft report to **hard fail** so invalid artifacts reject the Gate.
-
----
-
-## A) What changes (summary)
-
-1. Replace the existing **soft** validation step in `.github/workflows/chimerahydra-gate.yml` (labelled `Validate Chimera artifacts against schemas (4d, soft)`) with a **hard** variant labelled `Validate Chimera artifacts against schemas (4e, hard)`.
-2. Remove any `continue-on-error: true` from that validation step.
-3. Ensure the step exits non‑zero on invalid artifacts (the validator already returns proper exit codes). The downstream failure writer (9d) will publish a red legacy status.
-
----
-
-## B) YAML patch (unified diff)
-
-```diff
-*** .github/workflows/chimerahydra-gate.yml
-@@
--      - name: Validate Chimera artifacts against schemas (4d, soft)
--        run: |
--          python scripts/validate_artifacts.py --schemas-dir schemas --artifacts-dir artifacts --dialect 2020-12
--        continue-on-error: true
-+      - name: Validate Chimera artifacts against schemas (4e, hard)
-+        run: |
-+          python scripts/validate_artifacts.py --schemas-dir schemas --artifacts-dir artifacts --dialect 2020-12 --fail-on-invalid
-+        # Hard fail: no continue-on-error here. Any invalid artifact should fail the job.
-```
-
-> **Anchor for search:** `Validate Chimera artifacts against schemas (4d, soft)` → replace with the 4e block above.
-
----
-
-## C) Validator script (create if missing)
-
-Create `scripts/validate_artifacts.py` (idempotent safe). Exits **1** on any invalid artifact when `--fail-on-invalid` is supplied; otherwise exits **0** but prints a summary.
-
-```python
 #!/usr/bin/env python3
-import argparse, json, sys, pathlib
-from jsonschema import Draft202012Validator, ValidationError, RefResolver
+"""
+Validate JSON artifacts against JSON Schemas.
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--schemas-dir', default='schemas')
-parser.add_argument('--artifacts-dir', default='artifacts')
-parser.add_argument('--dialect', default='2020-12')
-parser.add_argument('--fail-on-invalid', action='store_true')
-args = parser.parse_args()
+Behavior:
+- In hard-fail mode (--fail-on-invalid), exit 1 if any artifact is invalid
+  or if no artifacts are found to validate, or if required schemas are missing.
+- In soft mode (default), print a summary but exit 0.
 
-schemas_dir = pathlib.Path(args.schemas_dir)
-artifacts_root = pathlib.Path(args.artifacts_dir)
+All code and comments are ASCII-only.
+"""
 
-# Map of artifact → schema file
+import argparse
+import json
+import sys
+import pathlib
+from jsonschema import Draft202012Validator, ValidationError
+try:
+    # RefResolver is deprecated but remains available in jsonschema 4.x.
+    # It is used here for simple local $ref resolution.
+    from jsonschema import RefResolver  # type: ignore
+except Exception:  # pragma: no cover
+    RefResolver = None  # Fallback if the import ever disappears
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Validate generated artifacts against JSON Schemas.")
+    p.add_argument("--schemas-dir", default="schemas", help="Directory containing JSON schema files.")
+    p.add_argument("--artifacts-dir", default="artifacts", help="Root directory containing artifact runs.")
+    p.add_argument("--dialect", default="2020-12", help="Schema dialect hint (currently informational).")
+    p.add_argument("--fail-on-invalid", action="store_true",
+                   help="Exit non-zero on invalid artifacts or missing setup.")
+    return p.parse_args()
+
+# Map of artifact file name -> corresponding schema file name
 SCHEMA_MAP = {
-    'prompt.audit.json': 'prompt.audit.schema.json',
-    'code.plan.json': 'code.plan.schema.json',
-    'codex.instructions.json': 'codex.instructions.schema.json',
+    "prompt.audit.json": "prompt.audit.schema.json",
+    "code.plan.json": "code.plan.schema.json",
+    "codex.instructions.json": "codex.instructions.schema.json",
 }
 
-# Load schemas
-schemas = {}
-for sch in set(SCHEMA_MAP.values()):
-    p = schemas_dir / sch
-    if not p.exists():
-        print(f"missing schema: {p}")
-        if args.fail_on_invalid:
-            sys.exit(1)
-        else:
-            print("warning: schema missing; skipping strict validation")
-    else:
-        with p.open('r', encoding='utf-8') as f:
-            schemas[sch] = json.load(f)
-
-invalid = []
-
-for run_dir in artifacts_root.rglob('*'):
-    if not run_dir.is_dir():
-        continue
-    for art_name, sch_name in SCHEMA_MAP.items():
-        art_path = run_dir / art_name
-        if not art_path.exists():
+def load_schemas(schemas_dir: pathlib.Path, hard: bool):
+    schemas = {}
+    store = {}
+    for sch in sorted(set(SCHEMA_MAP.values())):
+        p = schemas_dir / sch
+        if not p.exists():
+            print(f"missing schema: {p}")
+            if hard:
+                sys.exit(1)
             continue
         try:
-            data = json.loads(art_path.read_text(encoding='utf-8'))
-        except Exception as e:
-            invalid.append((str(art_path), f"json-parse-error: {e}"))
+            obj = json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(f"schema parse error: {p}: {e}")
+            if hard:
+                sys.exit(1)
+            else:
+                continue
+        schemas[sch] = obj
+        # Populate store for simple $ref resolution using file URIs.
+        store[p.resolve().as_uri()] = obj
+    return schemas, store
+
+def make_validator(schema_obj, schemas_dir: pathlib.Path, store):
+    if RefResolver is None:
+        # Fall back: no explicit resolver. This may limit $ref across files.
+        return Draft202012Validator(schema_obj)
+    base_uri = schemas_dir.resolve().as_uri().rstrip("/") + "/"
+    return Draft202012Validator(schema_obj, resolver=RefResolver(base_uri=base_uri, store=store))
+
+def main() -> int:
+    args = parse_args()
+    schemas_dir = pathlib.Path(args.schemas_dir)
+    artifacts_root = pathlib.Path(args.artifacts_dir)
+    hard = bool(args.fail_on_invalid)
+
+    schemas, store = load_schemas(schemas_dir, hard)
+
+    invalid = []
+    seen = 0
+
+    # Constrain to typical layout: artifacts/<ts>/<run_id>
+    for run_dir in artifacts_root.glob("*/*"):
+        if not run_dir.is_dir():
             continue
-        schema = schemas.get(sch_name)
-        if not schema:
-            # No schema: treat as invalid only in fail mode
-            if args.fail_on_invalid:
-                invalid.append((str(art_path), f"schema-missing: {sch_name}"))
-            continue
-        try:
-            Draft202012Validator(schema).validate(data)
-        except ValidationError as e:
-            invalid.append((str(art_path), f"schema: {sch_name}", f"error: {e.message}"))
+        for art_name, sch_name in SCHEMA_MAP.items():
+            art_path = run_dir / art_name
+            if not art_path.exists():
+                continue
+            seen += 1
+            try:
+                data = json.loads(art_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                invalid.append((str(art_path), f"json-parse-error: {e}"))
+                continue
 
-if invalid:
-    print("INVALID ARTIFACTS DETECTED:")
-    for row in invalid:
-        print(" - ", *row)
-    if args.fail_on_invalid:
-        sys.exit(1)
+            schema = schemas.get(sch_name)
+            if not schema:
+                msg = f"schema-missing: {sch_name}"
+                if hard:
+                    invalid.append((str(art_path), msg))
+                else:
+                    # In soft mode, warn but do not mark invalid.
+                    print(f"warning: {msg} for {art_path}")
+                continue
 
-print("validation: ok")
-```
+            validator = make_validator(schema, schemas_dir, store)
+            # Collect only the first error per file for brevity.
+            try:
+                validator.validate(data)
+            except ValidationError as e:
+                invalid.append((str(art_path), f"schema: {sch_name}", f"error: {e.message}"))
 
----
+    if seen == 0:
+        print("no artifacts found under 'artifacts/*/*' to validate")
+        if hard:
+            return 1
 
-## D) Post‑change behaviour
+    if invalid:
+        print("INVALID ARTIFACTS DETECTED:")
+        for row in invalid:
+            print(" - ", *row)
+        if hard:
+            return 1
 
-* On any invalid artifact, the validation step fails → job fails → **failure writer** posts a red legacy status to the PR **head SHA**.
-* When all artifacts conform, the workflow proceeds normally to the success writer.
+    print("validation: ok")
+    return 0
 
----
-
-## E) Manual test snippet (optional, local)
-
-* Temporarily introduce a known schema violation in a throwaway `artifacts/<ts>/<run_id>/prompt.audit.json` and run the Gate via `workflow_dispatch`. Expect a red status and step failure.
-
----
-
-**Ready for paste.** Apply the YAML replacement and create the validator script. Then commit as `chore(4e): flip validation to hard‑fail`.
+if __name__ == "__main__":
+    sys.exit(main())

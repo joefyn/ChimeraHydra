@@ -35,7 +35,7 @@ steps:
 
   # 4e - Schema validation (hard fail)
   - name: Validate Chimera artifacts against schemas (4e, hard)
-  # Step 6d — Check glossary drift (hard fail)
+  # Step 6d - Check glossary drift (hard fail)
   - name: Check glossary drift (6d, hard fail)
     if: ${{ always() }}
     run: |
@@ -89,3 +89,4 @@ steps:
           target_url: `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`
         });
 ```
+

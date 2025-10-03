@@ -1,0 +1,78 @@
+﻿{
+    "actions":  {
+                    "Action 1 - Gate YAML sanity":  {
+                                                        "1a":  "done",
+                                                        "1b":  "done",
+                                                        "1c":  "done",
+                                                        "1d":  "done",
+                                                        "1e":  "done"
+                                                    },
+                    "Action 2 - Branch protection":  {
+                                                         "2a":  "done",
+                                                         "2b":  "done",
+                                                         "2c":  "not_assessed",
+                                                         "2d":  "not_assessed"
+                                                     },
+                    "Action 3 - Line-ending stability":  {
+                                                             "3a":  "done",
+                                                             "3b":  "done",
+                                                             "3c":  "adopted",
+                                                             "3d":  "deferred",
+                                                             "3e":  "deferred"
+                                                         },
+                    "Action 4 - Artifact schemas + CI validation":  {
+                                                                        "4a":  "planned",
+                                                                        "4b":  "planned",
+                                                                        "4c":  "planned",
+                                                                        "4d":  "planned"
+                                                                    },
+                    "Action 5 - Python CLI (Track A)":  {
+                                                            "5a":  "planned",
+                                                            "5b":  "planned",
+                                                            "5c":  "planned",
+                                                            "5d":  "planned"
+                                                        },
+                    "Action 9 - Gate hardening":  {
+                                                      "9a":  "not_implemented",
+                                                      "9b":  "not_implemented",
+                                                      "9c":  "not_implemented",
+                                                      "9d":  "partial"
+                                                  }
+                },
+    "deferred":  [
+                     "Action 6 — Glossary lock \u0026 drift checks",
+                     "Action 7 — Bridge strictness (expect_sha + selector assertions)",
+                     "Action 8 — Execute \u0026 reports (changeset.diff, lint/test reports)",
+                     "Action 10 — Adopt (diff→ops)",
+                     "Action 11 — Observability (run.log JSONL)"
+                 ],
+    "roots":  {
+                  "proof_format":  "response: \u003c...\u003e",
+                  "hashing_policy":  "git blob based",
+                  "gate_status_policy":  "post success and failure to PR head (same context)",
+                  "no_continuations":  "Chat code must be single-line; multi-line edits go to canvas; each check prints exactly one \u0027response:\u0027 line.",
+                  "proof_format_style":  {
+                                             "machine_prefix":  "response: ",
+                                             "normal_bg":  "Yellow",
+                                             "normal_fg":  "Black",
+                                             "error_bg":  "Red",
+                                             "error_fg":  "White",
+                                             "note":  "Colors are cosmetic; captured text is plain"
+                                         },
+                  "enforce_one_step":  true,
+                  "deny_continuations":  true,
+                  "rsp_required":  true,
+                  "no_slips_clause":  "If assistant output lacks \u0027response:\u0027 or includes multiple actions, reject and request a single rsp-wrapped step."
+              },
+    "pointers":  {
+                     "pr_number":  12,
+                     "pr_head_sha":  "eedd562ac29d305bd819617ae01c449c9f5a01bc",
+                     "latest_status":  {
+                                           "context":  "chimera-gate / gate",
+                                           "state":  "success",
+                                           "url":  "https://github.com/joefyn/ChimeraHydra/actions/runs/18134915380"
+                                       }
+                 },
+    "updated":  "2025-10-02T10:01:47.9627091+01:00",
+    "handover_notes":  "Guardrails baked: one-line PowerShell only; wrap every command in rsp{ }; never continue; if a task needs multiple changes, split into separate steps."
+}

@@ -18,7 +18,6 @@ runs-on: ubuntu-latest
 steps:
 - uses: actions/checkout@v4
 
-```
   # Run your real gate checks here (replace with actual lints/tests/audits)
   - name: Run gate checks
     run: |
